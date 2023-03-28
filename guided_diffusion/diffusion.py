@@ -20,29 +20,32 @@ import random
 
 from scipy.linalg import orth
 
-
+#adding gaussian noise to the image 
 def get_gaussian_noisy_img(img, noise_level):
     return img + torch.randn_like(img).cuda() * noise_level
 
+#?
 def MeanUpsample(x, scale):
     n, c, h, w = x.shape
     out = torch.zeros(n, c, h, scale, w, scale).to(x.device) + x.view(n,c,h,1,w,1)
     out = out.view(n, c, scale*h, scale*w)
     return out
 
+#average along the channel dimension; make grayscale
 def color2gray(x):
     coef=1/3
     x = x[:,0,:,:] * coef + x[:,1,:,:]*coef +  x[:,2,:,:]*coef
     return x.repeat(1,3,1,1)
 
+#reverse grayscale to get color
 def gray2color(x):
     x = x[:,0,:,:]
     coef=1/3
-    base = coef**2 + coef**2 + coef**2
-    return torch.stack((x*coef/base, x*coef/base, x*coef/base), 1)    
+    base = coef**2 + coef**2 + coef**2 # 3 * 1/9 = 1/3
+    return torch.stack((x*coef/base, x*coef/base, x*coef/base), 1) #simply stack same channel for all 3 channels    
 
 
-
+#diffusion beta schedule for noise
 def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_timesteps):
     def sigmoid(x):
         return 1 / (np.exp(-x) + 1)
@@ -76,6 +79,7 @@ def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_time
     return betas
 
 
+#diffusion process class
 class Diffusion(object):
     def __init__(self, args, config, device=None):
         self.args = args
@@ -88,7 +92,9 @@ class Diffusion(object):
             )
         self.device = device
 
-        self.model_var_type = config.model.var_type
+        #from config file we take the model type info
+        self.model_var_type = config.model.var_type #==> for imagenet_255: fixedsmall
+        #define the noise scheduling as per the config file
         betas = get_beta_schedule(
             beta_schedule=config.diffusion.beta_schedule,
             beta_start=config.diffusion.beta_start,
@@ -98,15 +104,19 @@ class Diffusion(object):
         betas = self.betas = torch.from_numpy(betas).float().to(self.device)
         self.num_timesteps = betas.shape[0]
 
+        #following equation from simple diffusion process 
         alphas = 1.0 - betas
-        alphas_cumprod = alphas.cumprod(dim=0)
+        alphas_cumprod = alphas.cumprod(dim=0) #cumulative product
+        #add 1 at the beginning of the tensor
         alphas_cumprod_prev = torch.cat(
             [torch.ones(1).to(device), alphas_cumprod[:-1]], dim=0
         )
         self.alphas_cumprod_prev = alphas_cumprod_prev
+        #define the posterior variance in sampling time; see beta tilda in original equation
         posterior_variance = (
             betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
         )
+        #??define the log variance of the noise schedule  ??
         if self.model_var_type == "fixedlarge":
             self.logvar = betas.log()
         elif self.model_var_type == "fixedsmall":
@@ -139,8 +149,10 @@ class Diffusion(object):
             model.to(self.device)
             model = torch.nn.DataParallel(model)
 
+        #take parameters from config file to build the model architecture 
         elif self.config.model.type == 'openai':
             config_dict = vars(self.config.model)
+            #create architecture
             model = create_model(**config_dict)
             if self.config.model.use_fp16:
                 model.convert_to_fp16()
