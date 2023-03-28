@@ -475,7 +475,7 @@ class Diffusion(object):
         # first get the A matrix for degradation
         # then get the SVD of x at time steps and so on... to get the zero shot results
         """
-        # get degradation matrix
+        # get degradation matrix A and its SVD
         deg = args.deg
         A_funcs = None
         if deg == 'cs_walshhadamard':
@@ -502,8 +502,10 @@ class Diffusion(object):
         elif deg == 'colorization':
             from functions.svd_operators import Colorization
             A_funcs = Colorization(config.data.image_size, self.device)
+        # For Super resolution:  downsampling 
         elif deg == 'sr_averagepooling':
             blur_by = int(args.deg_scale)
+            # defined in functions.svd_operators 
             from functions.svd_operators import SuperResolution
             A_funcs = SuperResolution(config.data.channels, config.data.image_size, blur_by, self.device)
         elif deg == 'sr_bicubic':

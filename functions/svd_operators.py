@@ -483,6 +483,7 @@ class SuperResolution(A_functions):
         self.channels = channels
         self.y_dim = img_dim // ratio
         self.ratio = ratio
+        # initialize the matrix A and its SVD
         A = torch.Tensor([[1 / ratio**2] * ratio**2]).to(device)
         self.U_small, self.singulars_small, self.V_small = torch.svd(A, some=False)
         self.Vt_small = self.V_small.transpose(0, 1)
