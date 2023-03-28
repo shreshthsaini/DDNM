@@ -156,6 +156,7 @@ class Diffusion(object):
             model = create_model(**config_dict)
             if self.config.model.use_fp16:
                 model.convert_to_fp16()
+            #if we are using conditional model, load the checkpoint for the conditional model
             if self.config.model.class_cond:
                 ckpt = os.path.join(self.args.exp, 'logs/imagenet/%dx%d_diffusion.pt' % (
                 self.config.data.image_size, self.config.data.image_size))
@@ -163,18 +164,21 @@ class Diffusion(object):
                     download(
                         'https://openaipublic.blob.core.windows.net/diffusion/jul-2021/%dx%d_diffusion_uncond.pt' % (
                         self.config.data.image_size, self.config.data.image_size), ckpt)
+            #without conditional model
             else:
                 ckpt = os.path.join(self.args.exp, "logs/imagenet/256x256_diffusion_uncond.pt")
                 if not os.path.exists(ckpt):
                     download(
                         'https://openaipublic.blob.core.windows.net/diffusion/jul-2021/256x256_diffusion_uncond.pt',
                         ckpt)
-
+            
+            #loading the checkpoint
             model.load_state_dict(torch.load(ckpt, map_location=self.device))
             model.to(self.device)
             model.eval()
             model = torch.nn.DataParallel(model)
-
+            
+            #ignore for non conditional model
             if self.config.model.class_cond:
                 ckpt = os.path.join(self.args.exp, 'logs/imagenet/%dx%d_classifier.pt' % (
                 self.config.data.image_size, self.config.data.image_size))
@@ -201,7 +205,8 @@ class Diffusion(object):
                         return torch.autograd.grad(selected.sum(), x_in)[0] * self.config.classifier.classifier_scale
 
                 cls_fn = cond_fn
-
+        
+        #running the denoising based on SVD or non SVD of ZSIR
         if simplified:
             print('Run Simplified DDNM, without SVD.',
                   f'{self.config.time_travel.T_sampling} sampling steps.',
@@ -219,7 +224,7 @@ class Diffusion(object):
                  )
             self.svd_based_ddnm_plus(model, cls_fn)
             
-            
+    #simplified denoising based on ZSIR - without usig SVD     
     def simplified_ddnm_plus(self, model, cls_fn):
         args, config = self.args, self.config
 
@@ -427,14 +432,16 @@ class Diffusion(object):
         print("Number of samples: %d" % (idx_so_far - idx_init))
         
         
-
+    #SVD based DDNM
     def svd_based_ddnm_plus(self, model, cls_fn):
         args, config = self.args, self.config
-
+        
+        #since zero shot and no training, dataset and test_dataset are the same; as return from get_dataset
         dataset, test_dataset = get_dataset(args, config)
 
         device_count = torch.cuda.device_count()
 
+        #if only want to test on part/subset of total test dataset; default is -1 i.e. all
         if args.subset_start >= 0 and args.subset_end > 0:
             assert args.subset_end > args.subset_start
             test_dataset = torch.utils.data.Subset(test_dataset, range(args.subset_start, args.subset_end))
@@ -444,13 +451,17 @@ class Diffusion(object):
 
         print(f'Dataset has size {len(test_dataset)}')
 
+        #define seeds
         def seed_worker(worker_id):
             worker_seed = args.seed % 2 ** 32
             np.random.seed(worker_seed)
             random.seed(worker_seed)
 
+        #pytroch random generator
         g = torch.Generator()
+        #set seed for random generator
         g.manual_seed(args.seed)
+        #validation loader based on torch.utils.data.DataLoader
         val_loader = data.DataLoader(
             test_dataset,
             batch_size=config.sampling.batch_size,
@@ -459,7 +470,11 @@ class Diffusion(object):
             worker_init_fn=seed_worker,
             generator=g,
         )
-
+        """ 
+        #main ZSIR begins from here: 
+        # first get the A matrix for degradation
+        # then get the SVD of x at time steps and so on... to get the zero shot results
+        """
         # get degradation matrix
         deg = args.deg
         A_funcs = None
