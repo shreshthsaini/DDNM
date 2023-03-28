@@ -158,12 +158,18 @@ def dict2namespace(config):
     return namespace
 
 
+#run the main function
 def main():
+    #parsing the arguments and config file
     args, config = parse_args_and_config()
 
+    #run the diffusion process
     try:
+        #define the diffusion model
         runner = Diffusion(args, config)
+        #runn the diffusion process
         runner.sample(args.simplified)
+        
     except Exception:
         logging.error(traceback.format_exc())
 
