@@ -502,12 +502,14 @@ class Diffusion(object):
         elif deg == 'colorization':
             from functions.svd_operators import Colorization
             A_funcs = Colorization(config.data.image_size, self.device)
+        
         # For Super resolution:  downsampling 
         elif deg == 'sr_averagepooling':
             blur_by = int(args.deg_scale)
-            # defined in functions.svd_operators 
+            # defined in functions.svd_operators / all the degradation operators are defined there along with SVD and V,lambda etc parameter extraction as well. 
             from functions.svd_operators import SuperResolution
             A_funcs = SuperResolution(config.data.channels, config.data.image_size, blur_by, self.device)
+
         elif deg == 'sr_bicubic':
             factor = int(args.deg_scale)
             from functions.svd_operators import SRConv
@@ -550,6 +552,8 @@ class Diffusion(object):
                                    self.config.data.image_size, self.device)
         else:
             raise ValueError("degradation type not supported")
+        
+        #sigma_y hyperpara as per the equations in paper
         args.sigma_y = 2 * args.sigma_y #to account for scaling to [-1,1]
         sigma_y = args.sigma_y
         
@@ -558,10 +562,14 @@ class Diffusion(object):
         idx_so_far = args.subset_start
         avg_psnr = 0.0
         pbar = tqdm.tqdm(val_loader)
+        #sampling for each image; 
         for x_orig, classes in pbar:
+            #original image.
             x_orig = x_orig.to(self.device)
+            #transformed image to imagenet range / 256 and normalize if valid. check the dataset code.
             x_orig = data_transform(self.config, x_orig)
-
+            
+            #get the noisy image / i.e. downsampled image for super resolution.
             y = A_funcs.A(x_orig)
             
             b, hwc = y.size()
@@ -571,16 +579,17 @@ class Diffusion(object):
                 y = y.reshape((b, 1, h, w))
             elif 'inp' in deg or 'cs' in deg:
                 pass
-            else:
+            else:#just taking the H and W size by diving with channels.
                 hw = hwc / 3
-                h = w = int(hw ** 0.5)
-                y = y.reshape((b, 3, h, w))
+                h = w = int(hw ** 0.5) 
+                y = y.reshape((b, 3, h, w)) #from vector to image or just rearranging the image with dimensions.
                 
             if self.args.add_noise: # for denoising test
-                y = get_gaussian_noisy_img(y, sigma_y) 
+                y = get_gaussian_noisy_img(y, sigma_y) #defined at the top of this file. simple noise addition.
             
-            y = y.reshape((b, hwc))
+            y = y.reshape((b, hwc)) #reshaping to vector. 
 
+            #for DDNM; A'y which is basically x. 
             Apy = A_funcs.A_pinv(y).view(y.shape[0], config.data.channels, self.config.data.image_size,
                                                 self.config.data.image_size)
 
@@ -592,6 +601,7 @@ class Diffusion(object):
             elif deg == 'inpainting':
                 Apy += A_funcs.A_pinv(A_funcs.A(torch.ones_like(Apy))).reshape(*Apy.shape) - 1
 
+            #save the orig and upscaled version (A'y/Apy) of y image. 
             os.makedirs(os.path.join(self.args.image_folder, "Apy"), exist_ok=True)
             for i in range(len(Apy)):
                 tvu.save_image(
@@ -603,7 +613,9 @@ class Diffusion(object):
                     os.path.join(self.args.image_folder, f"Apy/orig_{idx_so_far + i}.png")
                 )
 
+            
             #Start DDIM
+            #initial noise image 
             x = torch.randn(
                 y.shape[0],
                 config.data.channels,
