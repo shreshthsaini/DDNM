@@ -146,6 +146,7 @@ def create_model(
     use_new_attention_order=False,
     **kwargs
 ):
+    #channel mult is values of channels in each layer
     if channel_mult == "":
         if image_size == 512:
             channel_mult = (0.5, 1, 1, 2, 2, 4, 4)
@@ -162,7 +163,7 @@ def create_model(
 
     attention_ds = []
     for res in attention_resolutions.split(","):
-        attention_ds.append(image_size // int(res))
+        attention_ds.append(image_size // int(res)) #for image 256, and atten_res = 32,16,8:  attention_ds = [8,16,32]
 
     return UNetModel(
         image_size=image_size,

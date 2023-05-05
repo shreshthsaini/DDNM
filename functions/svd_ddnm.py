@@ -18,31 +18,33 @@ def inverse_data_transform(x):
 
 def ddnm_diffusion(x, model, b, eta, A_funcs, y, cls_fn=None, classes=None, config=None):
     with torch.no_grad():
-
+        
         # setup iteration variables
-        skip = config.diffusion.num_diffusion_timesteps//config.time_travel.T_sampling
-        n = x.size(0)
-        x0_preds = []
-        xs = [x]
+        skip = config.diffusion.num_diffusion_timesteps//config.time_travel.T_sampling #we are sampling lets say 100 out of 1000 timesteps: 1000//100 = 10
+        n = x.size(0) #number of samples; 1
+        x0_preds = [] #output of the diffusion model
+        xs = [x] 
 
-        # generate time schedule
+        # generate time schedule; similar to repaint forward-backward step thing; see the function below
         times = get_schedule_jump(config.time_travel.T_sampling, 
                                config.time_travel.travel_length, 
                                config.time_travel.travel_repeat,
                               )
+        #shift and zip/pair; t and t+1 steps
         time_pairs = list(zip(times[:-1], times[1:]))
         
         # reverse diffusion sampling
         for i, j in tqdm(time_pairs):
-            i, j = i*skip, j*skip
+            #i,j are two consecutive timesteps
+            i, j = i*skip, j*skip #use skip multiplier to get the actual timestep number 
             if j<0: j=-1 
 
             if j < i: # normal sampling 
-                t = (torch.ones(n) * i).to(x.device)
-                next_t = (torch.ones(n) * j).to(x.device)
-                at = compute_alpha(b, t.long())
-                at_next = compute_alpha(b, next_t.long())
-                xt = xs[-1].to('cuda')
+                t = (torch.ones(n) * i).to(x.device) #n for number of samples =1
+                next_t = (torch.ones(n) * j).to(x.device) 
+                at = compute_alpha(b, t.long()) #alpha_t
+                at_next = compute_alpha(b, next_t.long()) #alpha_{t+1}
+                xt = xs[-1].to('cuda') #x_t
                 if cls_fn == None:
                     et = model(xt, t)
                 else:
@@ -51,15 +53,19 @@ def ddnm_diffusion(x, model, b, eta, A_funcs, y, cls_fn=None, classes=None, conf
                     et = et[:, :3]
                     et = et - (1 - at).sqrt()[0, 0, 0, 0] * cls_fn(x, t, classes)
 
+                # ???
                 if et.size(1) == 6:
                     et = et[:, :3]
 
-                x0_t = (xt - et * (1 - at).sqrt()) / at.sqrt()
+                # x_0|t
+                x0_t = (xt - et * (1 - at).sqrt()) / at.sqrt() #
 
+                # x_0|t' 
                 x0_t_hat = x0_t - A_funcs.A_pinv(
                     A_funcs.A(x0_t.reshape(x0_t.size(0), -1)) - y.reshape(y.size(0), -1)
                 ).reshape(*x0_t.size())
-
+                
+                #get the x_{t+1} from x_0|t' and x_0|t
                 c1 = (1 - at_next).sqrt() * eta
                 c2 = (1 - at_next).sqrt() * ((1 - eta ** 2) ** 0.5)
                 xt_next = at_next.sqrt() * x0_t_hat + c1 * torch.randn_like(x0_t) + c2 * et

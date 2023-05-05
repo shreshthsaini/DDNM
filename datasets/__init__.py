@@ -166,6 +166,7 @@ def get_dataset(args, config):
     elif config.data.dataset == 'ImageNet':
         # only use validation dataset here
         
+        #read the testing samples from imagenet present in exp/imagenet folder
         if config.data.subset_1k:
             from datasets.imagenet_subset import ImageDataset
             dataset = ImageDataset(os.path.join(args.exp, 'datasets', 'imagenet', 'imagenet'),

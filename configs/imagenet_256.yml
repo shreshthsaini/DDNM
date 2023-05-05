@@ -43,5 +43,5 @@ sampling:
     
 time_travel:
     T_sampling: 1000
-    travel_length: 1
-    travel_repeat: 4
+    travel_length: 10
+    travel_repeat: 3

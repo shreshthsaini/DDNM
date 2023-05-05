@@ -20,29 +20,32 @@ import random
 
 from scipy.linalg import orth
 
-
+#adding gaussian noise to the image 
 def get_gaussian_noisy_img(img, noise_level):
     return img + torch.randn_like(img).cuda() * noise_level
 
+#?
 def MeanUpsample(x, scale):
     n, c, h, w = x.shape
     out = torch.zeros(n, c, h, scale, w, scale).to(x.device) + x.view(n,c,h,1,w,1)
     out = out.view(n, c, scale*h, scale*w)
     return out
 
+#average along the channel dimension; make grayscale
 def color2gray(x):
     coef=1/3
     x = x[:,0,:,:] * coef + x[:,1,:,:]*coef +  x[:,2,:,:]*coef
     return x.repeat(1,3,1,1)
 
+#reverse grayscale to get color
 def gray2color(x):
     x = x[:,0,:,:]
     coef=1/3
-    base = coef**2 + coef**2 + coef**2
-    return torch.stack((x*coef/base, x*coef/base, x*coef/base), 1)    
+    base = coef**2 + coef**2 + coef**2 # 3 * 1/9 = 1/3
+    return torch.stack((x*coef/base, x*coef/base, x*coef/base), 1) #simply stack same channel for all 3 channels    
 
 
-
+#diffusion beta schedule for noise
 def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_timesteps):
     def sigmoid(x):
         return 1 / (np.exp(-x) + 1)
@@ -76,6 +79,7 @@ def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_time
     return betas
 
 
+#diffusion process class
 class Diffusion(object):
     def __init__(self, args, config, device=None):
         self.args = args
@@ -88,7 +92,9 @@ class Diffusion(object):
             )
         self.device = device
 
-        self.model_var_type = config.model.var_type
+        #from config file we take the model type info
+        self.model_var_type = config.model.var_type #==> for imagenet_255: fixedsmall
+        #define the noise scheduling as per the config file
         betas = get_beta_schedule(
             beta_schedule=config.diffusion.beta_schedule,
             beta_start=config.diffusion.beta_start,
@@ -98,15 +104,19 @@ class Diffusion(object):
         betas = self.betas = torch.from_numpy(betas).float().to(self.device)
         self.num_timesteps = betas.shape[0]
 
+        #following equation from simple diffusion process 
         alphas = 1.0 - betas
-        alphas_cumprod = alphas.cumprod(dim=0)
+        alphas_cumprod = alphas.cumprod(dim=0) #cumulative product
+        #add 1 at the beginning of the tensor
         alphas_cumprod_prev = torch.cat(
             [torch.ones(1).to(device), alphas_cumprod[:-1]], dim=0
         )
         self.alphas_cumprod_prev = alphas_cumprod_prev
+        #define the posterior variance in sampling time; see beta tilda in original equation
         posterior_variance = (
             betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
         )
+        #??define the log variance of the noise schedule  ??
         if self.model_var_type == "fixedlarge":
             self.logvar = betas.log()
         elif self.model_var_type == "fixedsmall":
@@ -139,11 +149,14 @@ class Diffusion(object):
             model.to(self.device)
             model = torch.nn.DataParallel(model)
 
+        #take parameters from config file to build the model architecture 
         elif self.config.model.type == 'openai':
             config_dict = vars(self.config.model)
+            #create architecture
             model = create_model(**config_dict)
             if self.config.model.use_fp16:
                 model.convert_to_fp16()
+            #if we are using conditional model, load the checkpoint for the conditional model
             if self.config.model.class_cond:
                 ckpt = os.path.join(self.args.exp, 'logs/imagenet/%dx%d_diffusion.pt' % (
                 self.config.data.image_size, self.config.data.image_size))
@@ -151,18 +164,21 @@ class Diffusion(object):
                     download(
                         'https://openaipublic.blob.core.windows.net/diffusion/jul-2021/%dx%d_diffusion_uncond.pt' % (
                         self.config.data.image_size, self.config.data.image_size), ckpt)
+            #without conditional model
             else:
                 ckpt = os.path.join(self.args.exp, "logs/imagenet/256x256_diffusion_uncond.pt")
                 if not os.path.exists(ckpt):
                     download(
                         'https://openaipublic.blob.core.windows.net/diffusion/jul-2021/256x256_diffusion_uncond.pt',
                         ckpt)
-
+            
+            #loading the checkpoint
             model.load_state_dict(torch.load(ckpt, map_location=self.device))
             model.to(self.device)
             model.eval()
             model = torch.nn.DataParallel(model)
-
+            
+            #ignore for non conditional model
             if self.config.model.class_cond:
                 ckpt = os.path.join(self.args.exp, 'logs/imagenet/%dx%d_classifier.pt' % (
                 self.config.data.image_size, self.config.data.image_size))
@@ -189,7 +205,8 @@ class Diffusion(object):
                         return torch.autograd.grad(selected.sum(), x_in)[0] * self.config.classifier.classifier_scale
 
                 cls_fn = cond_fn
-
+        
+        #running the denoising based on SVD or non SVD of ZSIR
         if simplified:
             print('Run Simplified DDNM, without SVD.',
                   f'{self.config.time_travel.T_sampling} sampling steps.',
@@ -207,7 +224,7 @@ class Diffusion(object):
                  )
             self.svd_based_ddnm_plus(model, cls_fn)
             
-            
+    #simplified denoising based on ZSIR - without usig SVD     
     def simplified_ddnm_plus(self, model, cls_fn):
         args, config = self.args, self.config
 
@@ -415,14 +432,16 @@ class Diffusion(object):
         print("Number of samples: %d" % (idx_so_far - idx_init))
         
         
-
+    #SVD based DDNM
     def svd_based_ddnm_plus(self, model, cls_fn):
         args, config = self.args, self.config
-
+        
+        #since zero shot and no training, dataset and test_dataset are the same; as return from get_dataset
         dataset, test_dataset = get_dataset(args, config)
 
         device_count = torch.cuda.device_count()
 
+        #if only want to test on part/subset of total test dataset; default is -1 i.e. all
         if args.subset_start >= 0 and args.subset_end > 0:
             assert args.subset_end > args.subset_start
             test_dataset = torch.utils.data.Subset(test_dataset, range(args.subset_start, args.subset_end))
@@ -432,13 +451,17 @@ class Diffusion(object):
 
         print(f'Dataset has size {len(test_dataset)}')
 
+        #define seeds
         def seed_worker(worker_id):
             worker_seed = args.seed % 2 ** 32
             np.random.seed(worker_seed)
             random.seed(worker_seed)
 
+        #pytroch random generator
         g = torch.Generator()
+        #set seed for random generator
         g.manual_seed(args.seed)
+        #validation loader based on torch.utils.data.DataLoader
         val_loader = data.DataLoader(
             test_dataset,
             batch_size=config.sampling.batch_size,
@@ -447,8 +470,12 @@ class Diffusion(object):
             worker_init_fn=seed_worker,
             generator=g,
         )
-
-        # get degradation matrix
+        """ 
+        #main ZSIR begins from here: 
+        # first get the A matrix for degradation
+        # then get the SVD of x at time steps and so on... to get the zero shot results
+        """
+        # get degradation matrix A and its SVD
         deg = args.deg
         A_funcs = None
         if deg == 'cs_walshhadamard':
@@ -475,10 +502,14 @@ class Diffusion(object):
         elif deg == 'colorization':
             from functions.svd_operators import Colorization
             A_funcs = Colorization(config.data.image_size, self.device)
+        
+        # For Super resolution:  downsampling 
         elif deg == 'sr_averagepooling':
             blur_by = int(args.deg_scale)
+            # defined in functions.svd_operators / all the degradation operators are defined there along with SVD and V,lambda etc parameter extraction as well. 
             from functions.svd_operators import SuperResolution
             A_funcs = SuperResolution(config.data.channels, config.data.image_size, blur_by, self.device)
+
         elif deg == 'sr_bicubic':
             factor = int(args.deg_scale)
             from functions.svd_operators import SRConv
@@ -521,6 +552,8 @@ class Diffusion(object):
                                    self.config.data.image_size, self.device)
         else:
             raise ValueError("degradation type not supported")
+        
+        #sigma_y hyperpara as per the equations in paper
         args.sigma_y = 2 * args.sigma_y #to account for scaling to [-1,1]
         sigma_y = args.sigma_y
         
@@ -529,10 +562,14 @@ class Diffusion(object):
         idx_so_far = args.subset_start
         avg_psnr = 0.0
         pbar = tqdm.tqdm(val_loader)
+        #sampling for each image; 
         for x_orig, classes in pbar:
+            #original image.
             x_orig = x_orig.to(self.device)
+            #transformed image to imagenet range / 256 and normalize if valid. check the dataset code.
             x_orig = data_transform(self.config, x_orig)
-
+            
+            #get the noisy image / i.e. downsampled image for super resolution.
             y = A_funcs.A(x_orig)
             
             b, hwc = y.size()
@@ -542,16 +579,17 @@ class Diffusion(object):
                 y = y.reshape((b, 1, h, w))
             elif 'inp' in deg or 'cs' in deg:
                 pass
-            else:
+            else:#just taking the H and W size by diving with channels.
                 hw = hwc / 3
-                h = w = int(hw ** 0.5)
-                y = y.reshape((b, 3, h, w))
+                h = w = int(hw ** 0.5) 
+                y = y.reshape((b, 3, h, w)) #from vector to image or just rearranging the image with dimensions.
                 
             if self.args.add_noise: # for denoising test
-                y = get_gaussian_noisy_img(y, sigma_y) 
+                y = get_gaussian_noisy_img(y, sigma_y) #defined at the top of this file. simple noise addition.
             
-            y = y.reshape((b, hwc))
+            y = y.reshape((b, hwc)) #reshaping to vector. 
 
+            #for DDNM; A'y which is basically x. 
             Apy = A_funcs.A_pinv(y).view(y.shape[0], config.data.channels, self.config.data.image_size,
                                                 self.config.data.image_size)
 
@@ -563,6 +601,7 @@ class Diffusion(object):
             elif deg == 'inpainting':
                 Apy += A_funcs.A_pinv(A_funcs.A(torch.ones_like(Apy))).reshape(*Apy.shape) - 1
 
+            #save the orig and upscaled version (A'y/Apy) of y image. 
             os.makedirs(os.path.join(self.args.image_folder, "Apy"), exist_ok=True)
             for i in range(len(Apy)):
                 tvu.save_image(
@@ -574,7 +613,9 @@ class Diffusion(object):
                     os.path.join(self.args.image_folder, f"Apy/orig_{idx_so_far + i}.png")
                 )
 
+            
             #Start DDIM
+            #initial noise image 
             x = torch.randn(
                 y.shape[0],
                 config.data.channels,
