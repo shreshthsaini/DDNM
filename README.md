@@ -1,4 +1,4 @@
-# Zero Shot Image Restoration Using Denoising Diffusion Null-Space Model
+# Zero-Shot Image Restoration Using Denoising Diffusion Null-Space Model
 ## 📖[**Paper**](https://arxiv.org/pdf/2212.00490.pdf)|🖼️[**Project Page**](https://wyhuai.github.io/ddnm.io/)| <a href="https://colab.research.google.com/drive/1SRSD6GXGqU0eO2CoTNY-2WykB9qRZHJv?usp=sharing"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="google colab logo"></a> [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/hysts/DDNM-HQ)
 
 [Yinhuai Wang*](https://wyhuai.github.io/info/), [Jiwen Yu*](https://scholar.google.com.hk/citations?user=uoRPLHIAAAAJ), [Jian Zhang](https://jianzhang.tech/)  
@@ -38,9 +38,9 @@ git clone https://github.com/wyhuai/DDNM.git
 pip install numpy torch blobfile tqdm pyYaml pillow    # e.g. torch 1.7.1+cu110.
 ```
 ### Pre-Trained Models
-To restore human face images, download this [model](https://image-editing-test-12345.s3-us-west-2.amazonaws.com/checkpoints/celeba_hq.ckpt)(from [SDEdit](https://github.com/ermongroup/SDEdit)) and put it into `DDNM/exp/logs/celeba/`. 
+To restore human face images, download this [model](https://drive.google.com/file/d/1wSoA5fm_d6JBZk4RZ1SzWLMgev4WqH21/view?usp=share_link)(from [SDEdit](https://github.com/ermongroup/SDEdit)) and put it into `DDNM/exp/logs/celeba/`. 
 ```
-wget https://image-editing-test-12345.s3-us-west-2.amazonaws.com/checkpoints/celeba_hq.ckpt
+https://drive.google.com/file/d/1wSoA5fm_d6JBZk4RZ1SzWLMgev4WqH21/view?usp=share_link
 ```
 To restore general images, download this [model](https://openaipublic.blob.core.windows.net/diffusion/jul-2021/256x256_diffusion_uncond.pt)(from [guided-diffusion](https://github.com/openai/guided-diffusion)) and put it into `DDNM/exp/logs/imagenet/`.
 ```
@@ -217,11 +217,11 @@ def ddnm_plus_core(x0t, y, sigma_y=0, sigma_t, a_t):
 # References
 If you find this repository useful for your research, please cite the following work.
 ```
-@article{wang2022ddnm,
-title={Zero Shot Image Restoration Using Denoising Diffusion Null-Space Model},
-author={Yinhuai, Wang and Jiwen, Yu and Jian, Zhang},
-journal={arXiv:2212.00490},
-year={2022}}
+@article{wang2022zero,
+  title={Zero-Shot Image Restoration Using Denoising Diffusion Null-Space Model},
+  author={Wang, Yinhuai and Yu, Jiwen and Zhang, Jian},
+  journal={arXiv preprint arXiv:2212.00490},
+  year={2022}
 }
 ```
 This implementation is based on / inspired by:
